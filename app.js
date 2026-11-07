@@ -1,0 +1,35 @@
+const $=id=>document.getElementById(id),C=StatsCore,KEY='poker-stats-lab.records.v1';let records=[],editing=null,originalDate=null,pending=null,mode='all',storageOK=true;
+const newId=()=>globalThis.crypto?.randomUUID?.()||'record-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)+'-'+Math.random().toString(36).slice(2);
+const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`};
+function notify(s){$('notice').textContent=s;}
+try{const raw=localStorage.getItem(KEY);if(raw){const data=JSON.parse(raw);if(!Array.isArray(data))throw Error();records=data.map(C.validate);}}catch(e){storageOK=false;notify('保存データを読み込めません。上書きを停止しました。バックアップを保管して再読み込みしてください。');}
+function commit(next){if(!storageOK)throw Error('保存領域を確認できないため変更を停止しています');localStorage.setItem(KEY,JSON.stringify(next));records=next;render();}
+function show(name){for(const s of ['entry','list','data']){$(s).hidden=s!==name;$(s+'Tab').classList.toggle('active',s===name);}if(name==='list')render();}
+for(const s of ['entry','list','data'])$(s+'Tab').onclick=()=>show(s);
+function reset(){editing=null;originalDate=null;$('form').reset();$('date').value=today();$('date').required=true;$('partial').hidden=true;$('formTitle').textContent='今日の戦績';$('cancel').hidden=true;}
+$('cancel').onclick=reset;
+$('form').onsubmit=e=>{e.preventDefault();try{const old=records.find(r=>r.id===editing);const date=$('date').value||originalDate;const r=C.validate({id:editing||newId(),date,venue:$('venue').value,event:$('event').value,players:Number($('players').value),rank:Number($('rank').value),createdAt:old?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()});if(records.some(a=>a.id!==editing&&C.key(a)===C.key(r)))throw Error('同じ戦績がすでに登録されています');commit(editing?records.map(a=>a.id===editing?r:a):[...records,r]);reset();notify('戦績を保存しました');show('list');}catch(e){notify('保存できませんでした：'+e.message);}};
+function edit(r){reset();editing=r.id;originalDate=r.date;$('date').value=r.date.length===10?r.date:'';$('date').required=r.date.length===10;if(r.date.length===7){$('partial').hidden=false;$('partial').textContent=r.date+'（日付不明）。日付を選ばなければ月のみを維持します。';}for(const f of ['venue','event','players','rank'])$(f).value=r[f];$('formTitle').textContent='戦績を編集';$('cancel').hidden=false;show('entry');window.scrollTo(0,0);}
+function render(){const rs=records.filter(r=>mode==='all'||r.date.slice(0,7)===$('month').value).sort((a,b)=>b.date.localeCompare(a.date)||(b.createdAt||'').localeCompare(a.createdAt||''));const v=C.stats(rs);$('stats').replaceChildren();['参加回数','優勝回数','優勝率','3位以内率','平均順位'].forEach((t,i)=>{const el=document.createElement('div');const num=document.createElement('strong');num.textContent=i<2?v[i]+'回':!rs.length?'—':v[i].toFixed(1)+(i<4?'%':'位');const label=document.createElement('span');label.textContent=t;el.append(num,label);$('stats').append(el);});$('records').replaceChildren();if(!rs.length){$('records').textContent='まだ戦績がありません。最初の1戦を記録しましょう。';return;}for(const r of rs){const row=document.createElement('article');row.className='record';const info=document.createElement('div');const date=document.createElement('strong');date.textContent=r.date.replaceAll('-','/')+(r.date.length===7?'（日付不明）':'');const title=document.createElement('small');title.textContent=r.venue+' · '+r.event;info.append(date,title);const rank=document.createElement('b');rank.className=r.rank===1?'winner':'';rank.textContent=`${r.rank}位 / ${r.players}人`;const actions=document.createElement('div');actions.className='actions';const eb=document.createElement('button');eb.textContent='編集';eb.onclick=()=>edit(r);const db=document.createElement('button');db.textContent='削除';db.onclick=()=>{if(confirm(`${r.date} ${r.rank}位 / ${r.players}人の戦績を削除しますか？`))try{commit(records.filter(a=>a.id!==r.id));if(editing===r.id)reset();notify('削除しました');}catch(e){notify('削除できません：'+e.message);}};actions.append(eb,db);row.append(info,rank,actions);$('records').append(row);}}
+$('all').onclick=()=>{mode='all';$('monthLabel').hidden=true;$('all').classList.add('active');$('monthly').classList.remove('active');render();};$('monthly').onclick=()=>{mode='month';$('monthLabel').hidden=false;$('all').classList.remove('active');$('monthly').classList.add('active');render();};$('month').value=today().slice(0,7);$('month').onchange=render;
+$('export').onclick=()=>{if(!storageOK){notify('読み込みエラーのため書き出せません');return;}const b=new Blob([JSON.stringify({app:'POKER STATS LAB',schemaVersion:1,exportedAt:new Date().toISOString(),records},null,2)],{type:'application/json'});const u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download=`poker-stats-${today()}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(u),10000);notify('バックアップを書き出しました');};
+$('import').onchange=async e=>{pending=null;$('preview').hidden=true;try{const f=e.target.files[0];if(!f)return;if(f.size>5e6)throw Error('5MB以下のJSONを選んでください');const d=JSON.parse(await f.text());if(d.schemaVersion!==1||!Array.isArray(d.records)||d.records.length>10000)throw Error('対応するバックアップ形式ではありません');pending=d.records.map(r=>C.validate({...r,id:r.id||newId()}));const m=C.merge(records,pending);$('previewText').textContent=`${pending.length}戦を確認。追加 ${m.records.length-records.length}戦 / 重複 ${m.skipped}戦。現在の記録は保持します。`;$('preview').hidden=false;}catch(e){notify('読み込めません：'+e.message);}e.target.value='';};$('confirmImport').onclick=()=>{try{if(!pending)return;const m=C.merge(records,pending);commit(m.records);pending=null;$('preview').hidden=true;notify('移行・復元が完了しました');show('list');}catch(e){notify('復元できません：'+e.message);}};$('cancelImport').onclick=()=>{pending=null;$('preview').hidden=true;};
+reset();render();if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>notify('オフライン準備に失敗しました。オンラインで再度開いてください。'));
+
+// Private migration data travels in the URL fragment, never in the public repository.
+try {
+ const fragment=new URLSearchParams(location.hash.slice(1));const packed=fragment.get('migrate');
+ if(packed){
+  if(packed.length>20000)throw Error('移行データが大きすぎます');
+  const bytes=Uint8Array.from(atob(packed.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
+  const payload=JSON.parse(new TextDecoder().decode(bytes));
+  if(payload.version!==1||!Array.isArray(payload.rows)||payload.rows.length>10000||typeof payload.batch!=='string'||!/^[a-z0-9-]{1,80}$/.test(payload.batch))throw Error('移行データの形式が不正です');
+  const marker=KEY+'.migration.'+payload.batch;
+  if(!localStorage.getItem(marker)){
+   const incoming=payload.rows.map((r,i)=>C.validate({id:payload.batch+'-'+String(i+1).padStart(3,'0'),date:r[0],rank:r[1],players:r[2],venue:payload.venue,event:payload.events[r[3]]}));
+   const merged=C.merge(records,incoming);const added=merged.records.length-records.length;commit(merged.records);localStorage.setItem(marker,'done');
+   notify(incoming.length+'戦を引き継ぎました（追加 '+added+'戦）。');
+  } else notify('既存戦績の引き継ぎは完了しています');
+  show('list');
+ }
+} catch(e){notify('自動引き継ぎに失敗しました：'+e.message+'。JSONから復元できます。');}

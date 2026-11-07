@@ -1,0 +1,7 @@
+(function(root){
+const key=r=>JSON.stringify([r.date,r.venue.trim(),r.event.trim(),r.players,r.rank]);
+function validate(r){if(!r||typeof r!=='object')throw Error('戦績の形式が不正です');if(typeof r.date!=='string'||!/^\d{4}-\d{2}(-\d{2})?$/.test(r.date))throw Error('日付の形式が不正です');const p=r.date.split('-').map(Number);if(p[0]<1900||p[0]>9999||p[1]<1||p[1]>12||(p.length===3&&(p[2]<1||p[2]>new Date(p[0],p[1],0).getDate())))throw Error('存在しない日付です');for(const f of ['venue','event'])if(typeof r[f]!=='string'||!r[f].trim()||r[f].length>120)throw Error('店舗名・大会名を確認してください');if(!Number.isSafeInteger(r.players)||r.players<1||r.players>1000000||!Number.isSafeInteger(r.rank)||r.rank<1||r.rank>r.players)throw Error('順位は1〜参加人数で入力してください');if(r.id!==undefined&&(typeof r.id!=='string'||!r.id||r.id.length>200))throw Error('IDが不正です');return {...r,venue:r.venue.trim(),event:r.event.trim()};}
+function merge(current,incoming){const out=[...current];let skipped=0;for(const x of incoming){const r=validate(x);if(out.some(a=>a.id===r.id&&r.id)){if(out.some(a=>a.id===r.id&&key(a)!==key(r)))throw Error('同じIDに異なる戦績があります。既存記録を編集してください');skipped++;continue;}if(out.some(a=>key(a)===key(r))){skipped++;continue;}out.push(r);}return {records:out,skipped};}
+function stats(rs){const n=rs.length,w=rs.filter(r=>r.rank===1).length;return [n,w,n?w/n*100:0,n?rs.filter(r=>r.rank<=3).length/n*100:0,n?rs.reduce((a,r)=>a+r.rank,0)/n:0];}
+const api={key,validate,merge,stats};root.StatsCore=api;if(typeof module!=='undefined')module.exports=api;
+})(typeof window!=='undefined'?window:globalThis);
